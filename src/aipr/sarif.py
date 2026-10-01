@@ -5,6 +5,7 @@ GitLab Vulnerability Reports, and any other consumer that speaks SARIF.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
@@ -69,6 +70,7 @@ def _make_result(
     level: str = "warning",
     repo: str | None = None,
     source: str | None = None,
+    files: list[str] | None = None,
 ) -> dict:
     result: dict[str, Any] = {
         "ruleId": rule_id,
@@ -77,25 +79,55 @@ def _make_result(
     }
     # repo for remote, source for local text mode
     qualified_name = repo or source or "unknown"
-    result["locations"] = [
-        {
-            "logicalLocations": [
-                {
-                    "fullyQualifiedName": qualified_name,
-                    "kind": "repository" if repo else "file",
-                }
-            ]
-        }
-    ]
+    locations: list[dict[str, Any]] = []
+
+    file_targets = files or ([source] if source and not repo else [])
+    if file_targets:
+        for file_path in file_targets:
+            clean_path = str(file_path).lstrip("/")
+            loc: dict[str, Any] = {
+                "physicalLocation": {
+                    "artifactLocation": {
+                        "uri": f"{{repoRoot}}/{clean_path}",
+                        "uriBaseId": "repoRoot",
+                    }
+                },
+                "logicalLocations": [
+                    {
+                        "fullyQualifiedName": qualified_name,
+                        "kind": "repository" if repo else "file",
+                    }
+                ],
+            }
+            locations.append(loc)
+    else:
+        locations.append(
+            {
+                "logicalLocations": [
+                    {
+                        "fullyQualifiedName": qualified_name,
+                        "kind": "repository" if repo else "file",
+                    }
+                ]
+            }
+        )
+
+    result["locations"] = locations
     return result
 
 
-def to_sarif(results: list[dict] | dict, version: str | None = None) -> dict:
+def to_sarif(
+    results: list[dict] | dict,
+    version: str | None = None,
+    root: Path | str | None = None,
+) -> dict:
     """Convert aipr classification results to SARIF 2.1.0 document.
 
     Args:
         results: list of classification dicts from classify_repo() or single-mode payload.
         version: aipr version string (for the tool metadata).
+        root: optional repository root directory for originalUriBaseIds.
+            If omitted, defaults to file://{repoRoot}/.
 
     Returns:
         SARIF 2.1.0 document as a dict.
@@ -105,6 +137,11 @@ def to_sarif(results: list[dict] | dict, version: str | None = None) -> dict:
             from . import __version__ as version
         except ImportError:
             version = "0.2.2"
+
+    if root is not None:
+        root_uri = Path(root).resolve().as_uri().rstrip("/") + "/"
+    else:
+        root_uri = "file://{repoRoot}/"
 
     # Normalize to list
     if isinstance(results, dict):
@@ -164,7 +201,14 @@ def to_sarif(results: list[dict] | dict, version: str | None = None) -> dict:
             )
 
         sarif_results.append(
-            _make_result(rule_id, message, level=level, repo=repo, source=source)
+            _make_result(
+                rule_id,
+                message,
+                level=level,
+                repo=repo,
+                source=source,
+                files=files,
+            )
         )
 
     return {
@@ -181,6 +225,12 @@ def to_sarif(results: list[dict] | dict, version: str | None = None) -> dict:
                     }
                 },
                 "results": sarif_results,
+                "originalUriBaseIds": {
+                    "repoRoot": {
+                        "uri": root_uri,
+                        "description": {"text": "Root of the repository being scanned"},
+                    }
+                },
             }
         ],
     }
