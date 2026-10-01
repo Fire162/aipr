@@ -368,8 +368,8 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_USAGE
 
     if args.text:
-        if len(args.repo) > 1:
-            parser.error("--text cannot be combined with multiple repos")
+        if args.repo:
+            parser.error("--text cannot be combined with repo")
         text = Path(args.text).read_text(encoding="utf-8", errors="replace")
         result = detect_policy(text)
         payload = {

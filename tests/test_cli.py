@@ -103,6 +103,24 @@ def test_no_args_is_usage_error(capsys):
     assert code == 64
 
 
+def test_text_mode_with_single_repo_rejected(tmp_path, capsys):
+    f = tmp_path / "policy.md"
+    f.write_text("Policy content\n")
+    with pytest.raises(SystemExit):
+        main(["--text", str(f), "owner/repo"])
+    err = capsys.readouterr().err
+    assert "--text cannot be combined with repo" in err
+
+
+def test_text_mode_with_multiple_repos_rejected(tmp_path, capsys):
+    f = tmp_path / "policy.md"
+    f.write_text("Policy content\n")
+    with pytest.raises(SystemExit):
+        main(["--text", str(f), "owner/repo1", "owner/repo2"])
+    err = capsys.readouterr().err
+    assert "--text cannot be combined with repo" in err
+
+
 @pytest.mark.parametrize("policy_file", [
     ".github/copilot-instructions.md",
     ".cursorrules",
