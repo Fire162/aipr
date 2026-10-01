@@ -3,6 +3,7 @@
 [![CI](https://github.com/yunaremaia/aipr/actions/workflows/ci.yml/badge.svg)](https://github.com/yunaremaia/aipr/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/yunaremaia/aipr/blob/main/LICENSE)
+![Stars](https://img.shields.io/github/stars/yunaremaia/aipr)
 
 **AI Policy Read** - read an open-source repository's AI contribution policy
 before you (or your agent) contribute.
@@ -213,6 +214,19 @@ jobs:
 Early beta - battle-tested against a handful of real policies (hister,
 modular, polars, MDAnalysis, maka). Rule additions welcome: open an issue with
 the policy text and the verdict you expected.
+
+
+If this tool is useful to you, a star helps other people find it.
+
+## Related tools
+
+- **[agent-guard](https://github.com/yunaremaia/agent-guard)** — enforce guardrails on AI agent tool calls
+- **[agentcost](https://github.com/yunaremaia/agentcost)** — track and attribute LLM spend per agent
+- **[gfi](https://github.com/yunaremaia/gfi)** — find well-scoped good first issues to start on
+- **[oss-contribution-finder](https://github.com/yunaremaia/oss-contribution-finder)** — find OSS projects ready to contribute to
+
+Part of a family of focused, single-purpose developer tools — each one does one thing
+and does it well.
 
 ## License
 
