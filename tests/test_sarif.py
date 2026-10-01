@@ -169,60 +169,95 @@ def test_sarif_all_levels_correct():
         assert result["level"] == expected_level, f"{verdict} should map to {expected_level}, got {result['level']}"
 
 
-def test_sarif_original_uri_base_ids_default():
-    """Verify originalUriBaseIds contains repoRoot with file://{repoRoot}/."""
+def test_sarif_no_root_omits_original_uri_base_ids():
+    """Verify originalUriBaseIds is omitted when root is None."""
     doc = to_sarif([], version="0.2.2")
     run = doc["runs"][0]
-    assert "originalUriBaseIds" in run
-    assert run["originalUriBaseIds"]["repoRoot"]["uri"] == "file://{repoRoot}/"
-    assert run["originalUriBaseIds"]["repoRoot"]["description"]["text"] == "Root of the repository being scanned"
+    assert "originalUriBaseIds" not in run
 
 
-def test_sarif_original_uri_base_ids_custom_root(tmp_path):
+def test_sarif_with_root_includes_original_uri_base_ids(tmp_path):
     """Verify passing a root directory sets originalUriBaseIds to that absolute URI."""
     doc = to_sarif([], version="0.2.2", root=tmp_path)
     run = doc["runs"][0]
+    assert "originalUriBaseIds" in run
     expected_uri = tmp_path.resolve().as_uri().rstrip("/") + "/"
     assert run["originalUriBaseIds"]["repoRoot"]["uri"] == expected_uri
+    assert run["originalUriBaseIds"]["repoRoot"]["description"]["text"] == "Root of the repository being scanned"
 
 
-def test_sarif_artifact_location_uri_format():
-    """Verify findings with files generate physicalLocation with {repoRoot}/ prefix and uriBaseId."""
+def test_sarif_artifact_location_relative_to_root(tmp_path):
+    """Verify findings with files generate relative paths in artifactLocation without {repoRoot}/ prefix."""
+    sub = tmp_path / "docs"
+    sub.mkdir()
+    f1 = sub / "AI_POLICY.md"
+    f1.write_text("no AI")
+
     results = [
         {
             "repo": "org/repo",
             "verdict": "human_only",
             "evidence": ["no AI"],
-            "files": ["CONTRIBUTING.md", "docs/AI_POLICY.md"],
+            "files": [str(f1)],
         }
     ]
-    doc = to_sarif(results, version="0.2.2")
+    doc = to_sarif(results, version="0.2.2", root=tmp_path)
     locations = doc["runs"][0]["results"][0]["locations"]
-    assert len(locations) == 2
+    assert len(locations) == 1
 
-    assert locations[0]["physicalLocation"]["artifactLocation"]["uri"] == "{repoRoot}/CONTRIBUTING.md"
+    assert locations[0]["physicalLocation"]["artifactLocation"]["uri"] == "docs/AI_POLICY.md"
     assert locations[0]["physicalLocation"]["artifactLocation"]["uriBaseId"] == "repoRoot"
     assert locations[0]["logicalLocations"][0]["fullyQualifiedName"] == "org/repo"
 
-    assert locations[1]["physicalLocation"]["artifactLocation"]["uri"] == "{repoRoot}/docs/AI_POLICY.md"
-    assert locations[1]["physicalLocation"]["artifactLocation"]["uriBaseId"] == "repoRoot"
+
+def test_sarif_out_of_root_fallback(tmp_path):
+    """Verify paths outside repo root fall back to file name to prevent leaking absolute paths."""
+    results = [
+        {
+            "repo": "org/repo",
+            "verdict": "human_only",
+            "evidence": ["no AI"],
+            "files": ["/outside/repo/path/CONTRIBUTING.md"],
+        }
+    ]
+    doc = to_sarif(results, version="0.2.2", root=tmp_path)
+    loc = doc["runs"][0]["results"][0]["locations"][0]
+    assert loc["physicalLocation"]["artifactLocation"]["uri"] == "CONTRIBUTING.md"
+    assert loc["physicalLocation"]["artifactLocation"]["uriBaseId"] == "repoRoot"
 
 
-def test_sarif_source_file_artifact_location():
-    """Verify local text file scans use source for artifactLocation."""
+def test_sarif_no_root_artifact_location():
+    """Verify when root is None, artifactLocation has no uriBaseId."""
     result = {
         "source": "AI_POLICY.md",
         "verdict": "permissive",
         "evidence": ["welcome"],
-        "files": [],
+        "files": ["AI_POLICY.md"],
     }
     doc = to_sarif(result, version="0.2.2")
     loc = doc["runs"][0]["results"][0]["locations"][0]
-    assert loc["physicalLocation"]["artifactLocation"]["uri"] == "{repoRoot}/AI_POLICY.md"
+    assert loc["physicalLocation"]["artifactLocation"]["uri"] == "AI_POLICY.md"
+    assert "uriBaseId" not in loc["physicalLocation"]["artifactLocation"]
+
+
+def test_sarif_cli_text_mode_with_root(tmp_path, capsys):
+    """Verify CLI --text with --sarif and --root passes root through."""
+    from aipr.cli import main
+    policy = tmp_path / "AI_POLICY.md"
+    policy.write_text("We warmly welcome AI-assisted contributions.\n")
+    code = main(["--text", str(policy), "--sarif", "--root", str(tmp_path)])
+    assert code == 0
+    import json
+    out = json.loads(capsys.readouterr().out)
+    run = out["runs"][0]
+    assert "originalUriBaseIds" in run
+    assert run["originalUriBaseIds"]["repoRoot"]["uri"] == tmp_path.resolve().as_uri().rstrip("/") + "/"
+    loc = run["results"][0]["locations"][0]
+    assert loc["physicalLocation"]["artifactLocation"]["uri"] == "AI_POLICY.md"
     assert loc["physicalLocation"]["artifactLocation"]["uriBaseId"] == "repoRoot"
 
 
-def test_sarif_validates_against_official_schema():
+def test_sarif_validates_against_official_schema(tmp_path):
     """Verify generated SARIF document validates against the SARIF 2.1.0 JSON schema."""
     import json
     from pathlib import Path
@@ -256,5 +291,11 @@ def test_sarif_validates_against_official_schema():
             "files": [],
         },
     ]
-    doc = to_sarif(results, version="0.2.2")
-    jsonschema.validate(instance=doc, schema=schema)
+    # Validate with root
+    doc_with_root = to_sarif(results, version="0.2.2", root=tmp_path)
+    jsonschema.validate(instance=doc_with_root, schema=schema)
+
+    # Validate without root
+    doc_without_root = to_sarif(results, version="0.2.2")
+    jsonschema.validate(instance=doc_without_root, schema=schema)
+

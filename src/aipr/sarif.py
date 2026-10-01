@@ -63,6 +63,21 @@ def _make_rule(rule_id: str, name: str, description: str) -> dict:
     }
 
 
+def _relpath(file: str, root: Path | None) -> str:
+    """Make file path relative to root, falling back to file name for out-of-root paths."""
+    if root is None:
+        return file
+
+    path = Path(file)
+    if not path.is_absolute():
+        return path.as_posix()
+
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return path.name  # fallback avoids leaking paths outside the repo root
+
+
 def _make_result(
     rule_id: str,
     message: str,
@@ -71,6 +86,7 @@ def _make_result(
     repo: str | None = None,
     source: str | None = None,
     files: list[str] | None = None,
+    root: Path | None = None,
 ) -> dict:
     result: dict[str, Any] = {
         "ruleId": rule_id,
@@ -83,14 +99,15 @@ def _make_result(
 
     file_targets = files or ([source] if source and not repo else [])
     if file_targets:
+        uri_base_id = "repoRoot" if root is not None else None
         for file_path in file_targets:
-            clean_path = str(file_path).lstrip("/")
+            clean_uri = _relpath(str(file_path), root)
+            artifact_location: dict[str, Any] = {"uri": clean_uri}
+            if uri_base_id is not None:
+                artifact_location["uriBaseId"] = uri_base_id
             loc: dict[str, Any] = {
                 "physicalLocation": {
-                    "artifactLocation": {
-                        "uri": f"{{repoRoot}}/{clean_path}",
-                        "uriBaseId": "repoRoot",
-                    }
+                    "artifactLocation": artifact_location
                 },
                 "logicalLocations": [
                     {
@@ -126,8 +143,10 @@ def to_sarif(
     Args:
         results: list of classification dicts from classify_repo() or single-mode payload.
         version: aipr version string (for the tool metadata).
-        root: optional repository root directory for originalUriBaseIds.
-            If omitted, defaults to file://{repoRoot}/.
+        root: optional repository root directory for originalUriBaseIds and relative paths.
+            If provided, originalUriBaseIds is emitted with repoRoot pointing to this root,
+            and findings use relative paths with uriBaseId="repoRoot".
+            If omitted (None), originalUriBaseIds and uriBaseId are omitted.
 
     Returns:
         SARIF 2.1.0 document as a dict.
@@ -138,10 +157,7 @@ def to_sarif(
         except ImportError:
             version = "0.2.2"
 
-    if root is not None:
-        root_uri = Path(root).resolve().as_uri().rstrip("/") + "/"
-    else:
-        root_uri = "file://{repoRoot}/"
+    root_path = Path(root).resolve() if root is not None else None
 
     # Normalize to list
     if isinstance(results, dict):
@@ -208,29 +224,32 @@ def to_sarif(
                 repo=repo,
                 source=source,
                 files=files,
+                root=root_path,
             )
         )
+
+    run: dict[str, Any] = {
+        "tool": {
+            "driver": {
+                "name": "aipr",
+                "version": version,
+                "informationUri": "https://github.com/yunaremaia/aipr",
+                "rules": rules,
+            }
+        },
+        "results": sarif_results,
+    }
+    if root_path is not None:
+        root_uri = root_path.as_uri().rstrip("/") + "/"
+        run["originalUriBaseIds"] = {
+            "repoRoot": {
+                "uri": root_uri,
+                "description": {"text": "Root of the repository being scanned"},
+            }
+        }
 
     return {
         "$schema": SARIF_SCHEMA,
         "version": "2.1.0",
-        "runs": [
-            {
-                "tool": {
-                    "driver": {
-                        "name": "aipr",
-                        "version": version,
-                        "informationUri": "https://github.com/yunaremaia/aipr",
-                        "rules": rules,
-                    }
-                },
-                "results": sarif_results,
-                "originalUriBaseIds": {
-                    "repoRoot": {
-                        "uri": root_uri,
-                        "description": {"text": "Root of the repository being scanned"},
-                    }
-                },
-            }
-        ],
+        "runs": [run],
     }

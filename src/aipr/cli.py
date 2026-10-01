@@ -204,6 +204,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", dest="as_json", help="JSON output")
     parser.add_argument("--sarif", action="store_true", dest="as_sarif", help="SARIF 2.1.0 output (for GitHub Code Scanning)")
     parser.add_argument(
+        "--root",
+        type=Path,
+        default=None,
+        help="repository root directory for SARIF path resolution (defaults to current directory for --text)",
+    )
+    parser.add_argument(
         "--explain",
         action="store_true",
         dest="explain",
@@ -386,7 +392,8 @@ def main(argv: list[str] | None = None) -> int:
         }.get(result.verdict, EXIT_OK if result.autonomous_safe else EXIT_UNSAFE)
         if args.as_sarif:
             from .sarif import to_sarif
-            print(json.dumps(to_sarif(payload), indent=2))
+            root = args.root or Path.cwd()
+            print(json.dumps(to_sarif(payload, root=root), indent=2))
         else:
             print(json.dumps(payload, indent=2) if args.as_json else _render(payload))
         return exit_code
@@ -411,7 +418,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.as_sarif:
         from .sarif import to_sarif
-        print(json.dumps(to_sarif(results), indent=2))
+        print(json.dumps(to_sarif(results, root=args.root), indent=2))
     elif args.as_json:
         print(json.dumps(results if len(results) > 1 else results[0], indent=2))
     else:
